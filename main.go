@@ -7,39 +7,25 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
-	"github.com/multiformats/go-multiaddr"
 )
 
+const DISCOVERY_SERVICE_TAG string = "resonate-local-node"
+
+// DiscoveryNotify gets notified whenever a new mDNS node is discovered
+// This implements the mdns.Notifee interface by implementing the method
+// HandlePeerFound()
+type discoveryNotifee struct {
+	discoveredNode host.Host
+}
+
 func main() {
-	ctx := context.Background() // create background context
 	// Create listener node
-	listenerNode := createNode()
-	getNodeInfo(listenerNode)
-
-	listenerAddr := listenerNode.Addrs()[0]                                                  // gets the first node address from the multiaddress list
-	var fullAddrString string = listenerAddr.String() + "/p2p/" + listenerNode.ID().String() // dynamically creates the address string
-	log.Info("Full addr to dial is: ", "addr", fullAddrString)
-
-	// Create dialer node that will connect to listener
-	dialerNode := createNode()
-	getNodeInfo(dialerNode)
-
-	// Converts the address string into a valid multiaddress
-	m, err := multiaddr.NewMultiaddr(fullAddrString)
+	node := createNode()
+	getNodeInfo(node)
+	err := initMDNSDiscovery(node) // creates an mDNS discovery service for the node
 	checkErr(err)
-
-	// Creates the peer address to that will be used for connection
-	paddr, err := peer.AddrInfoFromP2pAddr(m)
-	checkErr(err)
-
-	// Connect the dialer node to the listener node
-	connErr := dialerNode.Connect(ctx, *paddr)
-	if connErr == nil {
-		log.Info("CONNECTION SUCESSFULL")
-	} else {
-		checkErr(connErr)
-	}
 	select {}
 }
 
@@ -65,6 +51,23 @@ func checkErr(err error) {
 		log.Info("An error has occured", "err", err)
 		panic(err)
 	}
+}
+
+// HandlePeerFound connects to discovered mDNS peers on the local network
+func (dn *discoveryNotifee) HandlePeerFound(peerInfo peer.AddrInfo) {
+	log.Infof("Discovered new peer: %v", peerInfo)
+	err := dn.discoveredNode.Connect(context.Background(), peerInfo)
+	if err != nil {
+		log.Errorf("Error connecting to peer %s", dn.discoveredNode.ID().String())
+	} else {
+		log.Infof("Connected to peer node: %s", dn.discoveredNode.ID().String())
+	}
+}
+
+// Creates a new mDNS discovery service using the passed node, the discovery tag, and the struct that implements mdns.Notifee
+func initMDNSDiscovery(node host.Host) error {
+	mdnsService := mdns.NewMdnsService(node, DISCOVERY_SERVICE_TAG, &discoveryNotifee{discoveredNode: node})
+	return mdnsService.Start() // starts the mDNS service and returns any error
 }
 
 // Prints node info
