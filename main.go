@@ -17,7 +17,7 @@ const DISCOVERY_SERVICE_TAG string = "resonate-local-node"
 // This implements the mdns.Notifee interface by implementing the method
 // HandlePeerFound()
 type discoveryNotifee struct {
-	discoveredNode host.Host
+	currentNode host.Host
 }
 
 func main() {
@@ -55,18 +55,27 @@ func checkErr(err error) {
 
 // HandlePeerFound connects to discovered mDNS peers on the local network
 func (dn *discoveryNotifee) HandlePeerFound(peerInfo peer.AddrInfo) {
-	log.Infof("Discovered new peer: %v", peerInfo)
-	err := dn.discoveredNode.Connect(context.Background(), peerInfo)
+	// Check to ignore discovery of self
+	if dn.currentNode.ID() == peerInfo.ID {
+		return
+	}
+
+	log.Infof("Discovered new peer: %v\n", peerInfo.ID.String())
+	err := dn.currentNode.Connect(context.Background(), peerInfo)
 	if err != nil {
-		log.Errorf("Error connecting to peer %s", dn.discoveredNode.ID().String())
+		log.Errorf("Error connecting to peer %s", peerInfo.ID.String())
 	} else {
-		log.Infof("Connected to peer node: %s", dn.discoveredNode.ID().String())
+		log.Infof("Connected to peer node: %s\n", peerInfo.ID.String())
 	}
 }
 
-// Creates a new mDNS discovery service using the passed node, the discovery tag, and the struct that implements mdns.Notifee
+// Creates a new mDNS discovery service passing the local node, the discovery tag, and the struct that implements mdns.Notifee
 func initMDNSDiscovery(node host.Host) error {
-	mdnsService := mdns.NewMdnsService(node, DISCOVERY_SERVICE_TAG, &discoveryNotifee{discoveredNode: node})
+	// mDNS service fills the notifee struct with a reference to the local node.
+	// This struct serves as a watcher for the mDNS address.
+	// When another node with the service tag is found the service notifys the referenced node in the watcher (local node)
+	// and invokes the HandlePeerFound method to connect the peers.
+	mdnsService := mdns.NewMdnsService(node, DISCOVERY_SERVICE_TAG, &discoveryNotifee{currentNode: node})
 	return mdnsService.Start() // starts the mDNS service and returns any error
 }
 
