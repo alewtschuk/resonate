@@ -2,30 +2,31 @@ package main
 
 import (
 	"context"
+	"flag"
+	"io"
+	"resonate/internal/nodeconnection"
 
 	"github.com/charmbracelet/log"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 )
 
-const DISCOVERY_SERVICE_TAG string = "resonate-local-node"
-
-// DiscoveryNotify gets notified whenever a new mDNS node is discovered
-// This implements the mdns.Notifee interface by implementing the method
-// HandlePeerFound()
-type discoveryNotifee struct {
-	currentNode host.Host
-}
+const DISCOVERY_SERVICE_TAG string = "resonate-app-node-v0.0.1-adjfhadkljfhalkduhfalkjdfhalekj"
 
 func main() {
+	setFlags()
+	ctx := context.Background()
 	// Create listener node
 	node := createNode()
 	getNodeInfo(node)
-	err := initMDNSDiscovery(node) // creates an mDNS discovery service for the node
-	checkErr(err)
+	// err := nodeconnection.InitMDNSDiscovery(node, DISCOVERY_SERVICE_TAG) // creates an mDNS discovery service for the node
+	// if err == nil {
+	// 	log.Info("Successfully started mDNS service!")
+	// } else {
+	// 	checkErr(err)
+	// }
+	nodeconnection.InitDHTDiscovery(ctx, node, DISCOVERY_SERVICE_TAG, nil)
 	select {}
 }
 
@@ -48,41 +49,25 @@ func createNode() host.Host {
 // Checks any passed error and panics on error
 func checkErr(err error) {
 	if err != nil {
-		log.Info("An error has occured", "err", err)
+		log.Errorf("An error has occured: %v", err)
 		panic(err)
 	}
 }
 
-// HandlePeerFound connects to discovered mDNS peers on the local network
-func (dn *discoveryNotifee) HandlePeerFound(peerInfo peer.AddrInfo) {
-	// Check to ignore discovery of self
-	if dn.currentNode.ID() == peerInfo.ID {
-		return
-	}
-
-	log.Infof("Discovered new peer: %v\n", peerInfo.ID.String())
-	err := dn.currentNode.Connect(context.Background(), peerInfo)
-	if err != nil {
-		log.Errorf("Error connecting to peer %s", peerInfo.ID.String())
-	} else {
-		log.Infof("Connected to peer node: %s\n", peerInfo.ID.String())
-	}
-}
-
-// Creates a new mDNS discovery service passing the local node, the discovery tag, and the struct that implements mdns.Notifee
-func initMDNSDiscovery(node host.Host) error {
-	// mDNS service fills the notifee struct with a reference to the local node.
-	// This struct serves as a watcher for the mDNS address.
-	// When another node with the service tag is found the service notifys the referenced node in the watcher (local node)
-	// and invokes the HandlePeerFound method to connect the peers.
-	mdnsService := mdns.NewMdnsService(node, DISCOVERY_SERVICE_TAG, &discoveryNotifee{currentNode: node})
-	return mdnsService.Start() // starts the mDNS service and returns any error
-}
-
 // Prints node info
 func getNodeInfo(node host.Host) {
-	log.Infof("Node ID: %s", node.ID())
+	log.Infof("Node ID: %s", node.ID().String())
 	log.Infof("Node Address: %s\n", node.Addrs())
+}
+
+func setFlags() {
+	debugFlag := flag.Bool("debug", true, "Set debug flag level")
+	flag.Parse()
+
+	if !*debugFlag {
+		log.Warn("Running without debug output")
+		log.SetOutput(io.Discard)
+	}
 }
 
 // Sets logger level
